@@ -1,23 +1,27 @@
-FROM runpod/worker-comfyui:5.8.5-base
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
-# Qwen-Image-Edit core files
-# RUN comfy model download \
-#   --url https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_fp8_e4m3fn.safetensors \
-#   --relative-path models/diffusion_models \
-#   --filename qwen_image_edit_fp8_e4m3fn.safetensors
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu124 \
+    RUNPOD_MODEL_DIR=/runpod-volume/qwen-image-edit
 
-# RUN comfy model download \
-#   --url https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V1.0.safetensors \
-#   --relative-path models/loras \
-#   --filename Qwen-Image-Lightning-4steps-V1.0.safetensors
+WORKDIR /app
 
-# RUN comfy model download \
-#   --url https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors \
-#   --relative-path models/vae \
-#   --filename qwen_image_vae.safetensors
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# RUN comfy model download \
-#   --url https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors \
-#   --relative-path models/text_encoders \
-#   --filename qwen_2.5_vl_7b_fp8_scaled.safetensors
+COPY requirements.txt /app/requirements.txt
+
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    python -m pip install -r /app/requirements.txt
+
+COPY src /app/src
+COPY README.md /app/README.md
+
+CMD ["python", "-u", "src/handler.py"]
