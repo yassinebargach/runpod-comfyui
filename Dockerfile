@@ -4,7 +4,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu124 \
-    RUNPOD_MODEL_DIR=/runpod-volume/qwen-image-edit
+    HF_HOME=/workspace/hf \
+    HF_HUB_CACHE=/workspace/hf/hub \
+    HF_ASSETS_CACHE=/workspace/hf/assets \
+    HF_DATASETS_CACHE=/workspace/hf/datasets \
+    TRANSFORMERS_CACHE=/workspace/hf/transformers \
+    RUNPOD_MODEL_DIR=/app/models/qwen-image-edit \
+    PORT=8000
 
 WORKDIR /app
 
@@ -23,5 +29,9 @@ RUN python -m pip install --upgrade pip setuptools wheel && \
 
 COPY src /app/src
 COPY README.md /app/README.md
+COPY input.png /app/input.png
+RUN mkdir -p /app/models/qwen-image-edit /workspace/hf/hub /workspace/hf/assets /workspace/hf/transformers /workspace/hf/datasets
 
-CMD ["python", "-u", "src/handler.py"]
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "src.handler:app", "--host", "0.0.0.0", "--port", "8000"]

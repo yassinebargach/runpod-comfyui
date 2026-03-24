@@ -1,9 +1,9 @@
 runpod
-torch
-torchvision
 transformers
 accelerate
 safetensors
 sentencepiece
 Pillow
+fastapi
+uvicorn[standard]
 git+https://github.com/huggingface/diffusers.git

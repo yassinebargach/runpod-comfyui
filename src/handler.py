@@ -5,15 +5,22 @@ import os
 from threading import Lock
 from typing import Any, Dict, Optional
 
-import runpod
 import torch
 from diffusers import DiffusionPipeline
+from fastapi import FastAPI
 from PIL import Image
+from pydantic import BaseModel
 
 
+HF_TOKEN = os.environ.get("HF_TOKEN")
 MODEL_ID = "Qwen/Qwen-Image-Edit"
-MODEL_DIR = os.environ.get("RUNPOD_MODEL_DIR", "/runpod-volume/qwen-image-edit")
+MODEL_DIR = os.environ.get("RUNPOD_MODEL_DIR", "/workspace/models/qwen-image-edit")
 MODEL_INDEX_FILE = os.path.join(MODEL_DIR, "model_index.json")
+DEFAULT_INPUT_IMAGE_PATH = "/app/input.png"
+DEFAULT_WARDROBE_PROMPT = (
+    "Keep the same person, change clothes to blue navy suit, "
+    "white shirt, and dark green studio background"
+)
 
 DEFAULT_NUM_INFERENCE_STEPS = 30
 DEFAULT_GUIDANCE_SCALE = 4.0
@@ -21,6 +28,11 @@ DEFAULT_STRENGTH = 0.8
 
 _PIPELINE: Optional[DiffusionPipeline] = None
 _PIPELINE_LOCK = Lock()
+app = FastAPI(title="Qwen Image Edit Pod Worker", version="1.0.0")
+
+
+class JobRequest(BaseModel):
+    input: Dict[str, Any]
 
 
 def error_response(
@@ -58,6 +70,7 @@ def ensure_model_cached(dtype: torch.dtype) -> None:
         MODEL_ID,
         torch_dtype=dtype,
         local_files_only=False,
+        token=HF_TOKEN,
     )
     pipeline.save_pretrained(MODEL_DIR)
 
@@ -114,6 +127,16 @@ def encode_png_base64(image: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
+def encode_file_base64(path: str) -> str:
+    try:
+        with open(path, "rb") as file:
+            return base64.b64encode(file.read()).decode("utf-8")
+    except FileNotFoundError as exc:
+        raise ValueError(f"Input image not found at '{path}'.") from exc
+    except OSError as exc:
+        raise ValueError(f"Unable to read input image at '{path}'.") from exc
+
+
 def parse_seed(value: Any) -> Optional[int]:
     if value is None:
         return None
@@ -147,7 +170,7 @@ def build_generator(seed: Optional[int]) -> Optional[torch.Generator]:
     return torch.Generator(device="cuda").manual_seed(seed)
 
 
-def handler(job: Dict[str, Any]) -> Dict[str, Any]:
+def run_inference(job: Dict[str, Any]) -> Dict[str, Any]:
     job_input = job.get("input")
     if not isinstance(job_input, dict):
         return error_response(
@@ -205,7 +228,6 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         output_image = result.images[0]
         return {
             "image": encode_png_base64(output_image),
-            "cached_model_path": MODEL_DIR,
         }
     except Exception as exc:
         return error_response(
@@ -215,5 +237,28 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         )
 
 
-if __name__ == "__main__":
-    runpod.serverless.start({"handler": handler})
+@app.get("/health")
+def healthcheck() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/runsync")
+def runsync(job: JobRequest) -> Dict[str, Any]:
+    return run_inference(job.model_dump())
+
+
+@app.post("/run-test")
+def run_input_image() -> Dict[str, Any]:
+    try:
+        image_b64 = encode_file_base64(DEFAULT_INPUT_IMAGE_PATH)
+    except ValueError as exc:
+        return error_response(str(exc), details={"path": DEFAULT_INPUT_IMAGE_PATH})
+
+    return run_inference(
+        {
+            "input": {
+                "prompt": DEFAULT_WARDROBE_PROMPT,
+                "image": image_b64,
+            }
+        }
+    )
